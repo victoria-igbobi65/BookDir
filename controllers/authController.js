@@ -1,6 +1,7 @@
 const {promisify} = require('util')
 const User = require('../models/userModels')
 const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
 
 const AppError = require('../utils/appError')
 const sendEmail = require('../utils/email');
@@ -155,6 +156,62 @@ exports.forgotPassword = catchAsync(async(req, res, next) => {
     })
 
 
-exports.resetPassword = async(req, res, next) =>{
+exports.resetPassword = catchAsync(async(req, res, next) =>{
+    //GET USER FROM TOKEN
+    const hashedToken = crypto.createHash('sha256').update(req.params.token).digest('hex')
 
-}
+    const user = await User.findOne({
+        passwordResetToken: hashedToken,
+         passwordResetExpires: {$gt: Date.now()}})
+
+    //IF TOKEN HAS NOT EXPIRED AND THERE IS USER, SET THE NEW PASSWORD
+    if (!user){
+        return next(new AppError('Token is invalid or expired!', 400))
+    }
+
+    user.password = req.body.password
+    user.passwordConfirm = req.body.passwordConfirm
+    user.passwordResetToken = undefined
+    user.passwordResetExpires = undefined
+
+    await user.save()
+
+    //UPDATE CHANGED PASSWORD PROPERTY FOR THE USER
+    const token = signToken(user._id)
+
+    res.status(200).json({
+        status: true,
+        token 
+    })
+})
+
+exports.updatePassword = catchAsync(async (req, res, next) => {
+
+    //GET USER
+    const user = await User.findOne(req.user)
+    
+    if (!user){
+        return next(new AppError('user with id doesnt exist!', 404))
+    }
+
+    //CHECK IF POSTED PASSWORD IS CORRECT
+    const correctPassword = user.password === req.body.oldPassword
+    if (!correctPassword){
+        return next(new AppError('Incorrect password, Try again!', 400))
+    }
+
+    //UPDATEPASSWORD
+    user.password=req.body.newPassword
+    user.passwordConfirm=req.body.newPasswordConfirm
+    user.save()
+
+    // //LOG USER IN
+    const token = signToken(user._id);
+
+    res.status(200).json({
+        status: true,
+        token
+
+    });
+    
+});
